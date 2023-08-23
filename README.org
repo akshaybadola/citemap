@@ -1,0 +1,7 @@
+* CiteMap: Citation Maps in PyQt5
+
+  This is an attempt to visualize reference and citation data with PyQt5.
+  I'll try to keep this as simple as possible and see how far I can take it.
+  The citation and reference data is fetched with https://semanticscholar.org/ API.
+
+  More to follow
