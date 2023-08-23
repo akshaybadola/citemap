@@ -1,0 +1,24 @@
+menu_bar: false
+keybindings:
+  - action: Zoom in
+    key: Ctrl++
+  - action: Zoom Out
+    key: Ctrl+-
+  - action: Save File
+    key: Ctrl+s
+  - action: Quit
+    key: Ctrl+q
+  - action: Abort
+    key: ["Ctrl+g", "ESC"]
+  - action: Expand Children
+    key: ["j", "Up", "Ctrl+n"]
+  - action: Expand Parents
+    key: ["k", "Down", "Ctrl+p"]
+  - action: Go Left
+    key: ["h", "Left", "Ctrl+b"]
+  - action: Go Right
+    key: ["l", "Right", "Ctrl+f"]
+  - action: Select Parents
+    key: Shift+p
+  - action: Select Children
+    key: Shift+n

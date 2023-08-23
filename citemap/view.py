@@ -126,6 +126,7 @@ class View(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
             self._mousePressed = False
             super().mouseReleaseEvent(event)
+        self._scene.resize_and_update()
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -138,19 +139,19 @@ class View(QGraphicsView):
         if event.key() == Qt.Key_Shift and not self._mousePressed:
             self._isPanning = True
             self.setCursor(Qt.OpenHandCursor)
-        pass
+
         if not self._scene.typing:  # All the key events handled by the scene go here
             if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
                 self._scene.select_all()
             if event.key() == Qt.Key_N and event.modifiers() & Qt.ShiftModifier:  # maybe change this later
                 selected = self.scene().selectedItems()
                 self._scene.select_descendants(selected)
-            if event.key() == Qt.Key_S:
-                if event.modifiers() & Qt.ControlModifier:
-                    self._scene.search_toggle()
-                else:
-                    self._scene.save_data()
-                event.accept()
+            # if event.key() == Qt.Key_S:
+            #     if event.modifiers() & Qt.ControlModifier:
+            #         self._scene.search_toggle()
+            #     else:
+            #         self._scene.save_data()
+            #     event.accept()
             if event.key() == Qt.Key_P or event.key() == Qt.Key_Return:  # open_pdf
                 items = self.scene().selectedItems()
                 if len(items) == 1 and (
@@ -203,7 +204,6 @@ class View(QGraphicsView):
         else:
             super().keyPressEvent(event)
 
-
     def keyReleaseEvent(self, event):
         # if any keyrelease happens, remove all arrows
         # Though, this is more of a hack.
@@ -225,7 +225,7 @@ class View(QGraphicsView):
         # Move scene to old position
         delta = newPos - old_pos
         self.translate(delta.x(), delta.y())
-        self.scene().update()
+        self.scene().resize_and_update()
 
     def zoom_out(self, pos, old_pos):
         zoomFactor = self.zoomOutFactor
@@ -237,20 +237,20 @@ class View(QGraphicsView):
         # Move scene to old position
         delta = newPos - old_pos
         self.translate(delta.x(), delta.y())
-        self.scene().update()
+        self.scene().resize_and_update()
 
     def wheelEvent(self, event):
-        # Set Anchors
-        self.setTransformationAnchor(QGraphicsView.NoAnchor)
-        self.setResizeAnchor(QGraphicsView.NoAnchor)
-        # Save the scene pos
-        old_pos = self.mapToScene(event.pos())
+        if event.modifiers() and Qt.ControlModifier:
+            self.setTransformationAnchor(QGraphicsView.NoAnchor)
+            self.setResizeAnchor(QGraphicsView.NoAnchor)
+            # Save the scene pos
+            old_pos = self.mapToScene(event.pos())
 
-        # Zoom
-        if event.angleDelta().y() > 0:
-            self.zoom_in(event.pos(), old_pos)
-        else:
-            self.zoom_out(event.pos(), old_pos)
+            # Zoom
+            if event.angleDelta().y() > 0:
+                self.zoom_in(event.pos(), old_pos)
+            else:
+                self.zoom_out(event.pos(), old_pos)
 
 
 if __name__ == '__main__':

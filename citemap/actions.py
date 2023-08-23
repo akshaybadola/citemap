@@ -36,3 +36,37 @@ def expand_children(win):
 
 def expand_parents(win):
     win._view.scene().expand_parents()
+
+
+def go_left(win):
+    win._view.scene().cycle_between("horizontal", "l", True)
+
+
+def go_right(win):
+    win._view.scene().cycle_between("horizontal", "r", True)
+
+
+def go_up(win):
+    win._view.scene().cycle_between("vertical", "u", True)
+
+
+def go_down(win):
+    win._view.scene().cycle_between("vertical", "d", True)
+
+
+def select_all(win):
+    win._view.scene().select_all()
+
+
+def select_parents(win):
+    selected = win._view.scene().get_selected()
+    win._view.scene().select_parents(selected)
+
+
+def select_children(win):
+    selected = win._view.scene().get_selected()
+    win._view.scene().select_children(selected)
+
+
+def toggle_search(win):
+    win._view.scene().search_toggle()

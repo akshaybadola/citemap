@@ -102,6 +102,16 @@ class CiteMap(QGraphicsScene):
         self.status_bar.show()
         self.status_bar.showMessage("Ready...", 0)
 
+    def resize_and_update(self):
+        items_rect = self.itemsBoundingRect()
+        scene_rect = self.sceneRect()
+        ir_size = items_rect.size()
+        sr_size = scene_rect.size()
+        print((ir_size.width() * ir_size.height()), (sr_size.width() * sr_size.height()))
+        if (ir_size.width() * ir_size.height()) > (sr_size.width() * sr_size.height()):
+            self.setSceneRect(items_rect)
+        self.update()
+
     def coord(self, item) -> xy:
         """Return coordinates :class:`xy` for item of supported type
 
@@ -209,6 +219,36 @@ class CiteMap(QGraphicsScene):
         else:
             warnings.warn("No citations for entry. Need to fetch")
 
+    def cycle_between(self, direction, movement=None, cycle=False):
+        print (self.movement, movement)
+        if not self.movement:
+            self.movement = movement
+            self.cycle_between(direction, movement, cycle=cycle)
+        elif self.movement != movement:
+            print (self.entries[self.cycle_items[self.cycle_index]].family[direction])
+            if 'parent' in self.entries[self.cycle_items[self.cycle_index]].family[direction] or \
+               'children' in self.entries[self.cycle_items[self.cycle_index]].family[direction]:
+                self.movement = None
+                self.cycle_items = []
+                self.toggle_nav_cycle(False)
+                return direction
+            else:
+                return
+        # self.dir_map[
+        else:
+            if direction == self.dir_map[self.movement][0]:
+                if not cycle:
+                    self.cycle_index = max(0, self.cycle_index - 1)
+                else:
+                    self.cycle_index = (self.cycle_index - 1) % len(self.cycle_items)
+            elif direction == self.dir_map[self.movement][1]:
+                if not cycle:
+                    self.cycle_index = min(len(self.cycle_items) - 1, self.cycle_index + 1)
+                else:
+                    self.cycle_index = (self.cycle_index + 1) % len(self.cycle_items)
+            self.select_one(self.cycle_items[self.cycle_index])
+            return None
+
     def expand_children(self):
         selected = self.get_selected()
         if not len(selected) == 1:
@@ -221,8 +261,7 @@ class CiteMap(QGraphicsScene):
             self.toggle_nav_cycle(False)
             self.toggle_nav_cycle(True, item_inds=entry.family['children'],
                                   movement=self.inverse_orientmap["d"])
-        self.setSceneRect(self.itemsBoundingRect())
-        self.update()
+        self.resize_and_update()
 
     def expand_parents(self):
         selected = self.get_selected()
@@ -236,8 +275,7 @@ class CiteMap(QGraphicsScene):
             self.toggle_nav_cycle(False)
             self.toggle_nav_cycle(True, item_inds=entry.family['parents'],
                                   movement=self.inverse_orientmap["u"])
-        self.setSceneRect(self.itemsBoundingRect())
-        self.update()
+        self.resize_and_update()
 
     def partial_expand(self, direction):
         selected = self.get_selected()
@@ -362,7 +400,7 @@ class CiteMap(QGraphicsScene):
                                              coords=pos, shape=shape,
                                              data=data or {},
                                              paper_data=paper_data)
-        self.update()
+        self.resize_and_update()
 
     def update_parent(self, children, target):
         # if there are multiple famillies, find the highest member in each
@@ -793,7 +831,22 @@ class CiteMap(QGraphicsScene):
     def select(self, ind):
         self.entries[ind].shape_item.setSelected(True)
 
-    def select_descendants(self, entries):
+    def select_parents(self, entries):
+        recurse_ = []
+        for e in entries:
+            if isinstance(e, Shape):
+                e.setSelected(True)
+                e = e.text_item
+            # elif isinstance(t, Thought):
+            #     t.shape_item.setSelected(True)
+            if e.family['parents']:
+                recurse_ += [self.entries[i] for i in e.family['parents']]
+        if recurse_:
+            self.select_descendants(recurse_)
+        else:
+            return
+
+    def select_children(self, entries):
         recurse_ = []
         for e in entries:
             if isinstance(e, Shape):
@@ -804,7 +857,7 @@ class CiteMap(QGraphicsScene):
             if e.family['children']:
                 recurse_ += [self.entries[i] for i in e.family['children']]
         if recurse_:
-            self.select_descendants(recurse_)
+            self.select_children(recurse_)
         else:
             return
 
