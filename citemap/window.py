@@ -3,7 +3,7 @@ from functools import partial
 from PyQt5.QtWidgets import QMainWindow, QAction
 
 from . import actions
-from .ss import SS
+# from .ss import S2
 
 
 class AppWindow(QMainWindow):
@@ -13,8 +13,8 @@ class AppWindow(QMainWindow):
         self._title = title
         self._actions = {}
         self._config = config
-        self._ss = SS(config.data_dir)
-        view._scene.set_ss(self._ss)
+        # self._ss = S2(config.data_dir)
+        # view._scene.set_ss(self._ss)
         self.initUI(view)
 
     def _add_action(self, name, key_seq, func, menu=None):

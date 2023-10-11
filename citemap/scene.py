@@ -3,44 +3,50 @@ import operator
 from functools import reduce, partial
 import warnings
 from dataclasses import dataclass
+from enum import IntEnum
 
 from PyQt5.QtCore import Qt, QRectF, QPointF
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsItem
 
+from common_pyutil.functional import first_by, maybe_then, lens
 
-from .paper import Entry
+from .models import xy, rect
+from .entry import Entry
 from .link import Arrow, Link
 from .shape import Shape, Shapes
-from .io import save_file, load_file
-from .util import PathLike
+from .util import Pathlike, save_file, load_file
 from . import ss
 
 
 Coord = tuple[int, int]
 
 
-@dataclass
-class xy:
-    x: int
-    y: int
-
-    def __init__(self, *args):
-        if len(args) == 2:
-            self.x = args[0]
-            self.y = args[1]
-        else:
-            self.x = args[0][0]
-            self.y = args[0][1]
+class Axis(IntEnum):
+    positive = 1
+    negative = 2
 
 
+class Movement(IntEnum):
+    horizontal = 1
+    vertical = 2
+
+
+class Directions(IntEnum):
+    up = 1
+    down = 2
+    left = 3
+    right = 4
+
+
+# TODO: All this dicts should be replaced with enums
 class CiteMap(QGraphicsScene):
     """A scene to hold a mindmap. Scene is separate from the mindmap
     so that a new mindmap can be placed on to it easily if required.
 
     """
 
-    def __init__(self, filename: Optional[PathLike] = None):
+    def __init__(self, s2: ss.S2, filename: Optional[Pathlike] = None):
         """Initialize the MindMap Scene
 
         Args:
@@ -50,6 +56,7 @@ class CiteMap(QGraphicsScene):
 
         """
         super().__init__()
+        self._s2 = s2
         self.filename = filename
         self.default_insert_direction = 'u'
         self.direction_map = {"pos": {"horizontal": "r", "vertical": "d"},
@@ -69,6 +76,10 @@ class CiteMap(QGraphicsScene):
                                   "r": {"u", "d", "l"},
                                   "u": {"l", "d", "r"},
                                   "d": {"u", "l", "r"}}
+        self._new_inverse_map = {"u": ["l", "r"],
+                                 "d": ["l", "r"],
+                                 "l": ["u", "d"],
+                                 "r": ["u", "d"]}
         self.op_map = {"l": (-200, 0), "r": (200, 0), "u": (0, -200), "d": (0, 200)}
         self.movement = None
         self.cycle_index = 0
@@ -86,10 +97,76 @@ class CiteMap(QGraphicsScene):
         self.node_positions = []
         self.dragging_items = []
         self.target_item = None
-        self._paper_metadata_cache = {}
+        self._entry_data_cache: dict[str, str] = {}
+        self._collapsed_entry_fields = ss.PaperFields()
+        self._collapsed_entry_fields.abstract = False
+        self._collapsed_entry_fields.citationCount = True
+        self._expanded_entry_fields = ss.PaperFields()
+        self._expanded_entry_fields.abstract = True
+        self._expanded_entry_fields.citationCount = True
 
-    def set_ss(self, ss):
-        self._ss = ss
+
+    def get_entry(self, entry_or_index):
+        entry = maybe_then(entry_or_index, [int, Shape, Entry],
+                           [lambda x: self.entries[x],
+                            lambda x: x.text_item,
+                            lambda x: x])
+        if isinstance(entry, Shape):
+            entry = entry.text_item
+        return entry
+
+    def sibling_add_directions(self, relative_add_direction):
+        """Get the sibilng addition direction from relative addition direction
+
+        Args:
+            relative_add_direction: The direction relative (parent or child) was added
+
+
+        """
+        return self._new_inverse_map[relative_add_direction]
+
+    def coord(self, item) -> xy:
+        """Overloaded function to return ind_ordinate :class:`xy` for item of supported type
+
+        """
+        if isinstance(item, int):
+            _xy = self.entries[item].shape_item.pos().x(), self.entries[item].shape_item.pos().y()
+        elif isinstance(item, Entry):
+            _xy = item.shape_item.pos().x(), item.shape_item.pos().y()
+        elif isinstance(item, Shape):
+            _xy = item.pos().x(), item.pos().y()
+        elif isinstance(item, QPointF):
+            _xy = item.x(), item.y()
+        elif isinstance(item, tuple):
+            _xy = item
+        return xy(_xy)
+
+    def rect(self, item) -> xy:
+        entry = self.get_entry(item)
+        bounding_rect = entry.boundingRect()
+        return rect(bounding_rect.getRect())
+
+    def dist(self, a, b):
+        """Return squared Euclidean distance between two data types
+        Overloaded a, b are supported from which x, y ind_ordinate
+        can be extracted.
+
+        Args:
+            a: Data type a
+            b: Data type b
+
+
+        """
+        coord_a, coord_b = self.coord(a), self.coord(b)
+        return (coord_a.x - coord_b.x) ** 2 + (coord_a.y - coord_b.y) ** 2
+
+    @property
+    def s2(self):
+        return self._s2
+
+    @s2.setter
+    def s2(self, x):
+        self._s2 = x
 
     def init_widgets(self, search_widget, status_bar):
         self.search_widget = search_widget
@@ -107,38 +184,183 @@ class CiteMap(QGraphicsScene):
         scene_rect = self.sceneRect()
         ir_size = items_rect.size()
         sr_size = scene_rect.size()
-        print((ir_size.width() * ir_size.height()), (sr_size.width() * sr_size.height()))
+        print("resize_and_update", (ir_size.width() * ir_size.height()), (sr_size.width() * sr_size.height()))
         if (ir_size.width() * ir_size.height()) > (sr_size.width() * sr_size.height()):
             self.setSceneRect(items_rect)
         self.update()
-
-    def coord(self, item) -> xy:
-        """Return coordinates :class:`xy` for item of supported type
-
-        """
-        if isinstance(item, int):
-            _xy = self.entries[item].shape_item.pos().x(), self.entries[item].shape_item.pos().y()
-        elif isinstance(item, Entry):
-            _xy = item.shape_item.pos().x(), item.shape_item.pos().y()
-        elif isinstance(item, Shape):
-            _xy = item.pos().x(), item.pos().y()
-        elif isinstance(item, QPointF):
-            _xy = item.x(), item.y()
-        elif isinstance(item, tuple):
-            _xy = item
-        return xy(_xy)
 
     def links_zvalue(self, t, value=1):
         for k in self.links.keys():
             if t.index in k:
                 self.links[k].setZValue(value)
 
+    def select_next(self):
+        """Select next entry
+
+        If there's no selected entry, select the first one.
+        If there are some selected entries, select :code:`max(lambda x: entry.index) + 1`
+
+        """
+
+        selected = self.get_selected()
+        if selected:
+            if len(selected) > 1:
+                index = max([x.index for x in self.selected])
+            else:
+                index = selected[0].index
+            next_index = (index+1) % (len(self.entries)+1) or 1
+        else:
+            next_index = self.entries[1].index
+        print(f"selecting {next_index}")
+        self.select_one(next_index)
+
+    # TODO: I THINK The entry is only select if it is visible
+    def select_one(self, t_ind: int):
+        """Select one of the siblings of either parents or children of an entry.
+
+        Args:
+            t_ind: index of the entry
+
+        """
+        if isinstance(t_ind, list):
+            e = self.entries[t_ind[0]]
+        else:
+            e = self.entries[t_ind]
+        if e.shape_item.isVisible():
+            self.unselect_all()
+            e.shape_item.setSelected(True)
+            gview = self.views()[0]
+            gview.ensureVisible(e.shape_item)
+
+    def fetch_paper_data(self, paper_id):
+        """Fetch the formatted entry text from the S2 client
+
+        Args:
+            paper_id: 
+
+
+        """
+        entry_data = self._s2.get_paper_data(paper_id)
+        # import ipdb; ipdb.set_trace()
+        self._entry_data_cache[paper_id] = entry_data
+
+    def _ensure_paper_metadata(self, entry):
+        item = entry.text_item
+        if item.paper_data.paperId not in self._entry_data_cache:
+            self.fetch_paper_data(item.paper_data.paperId)
+        metadata = self._entry_data_cache[item.paper_data.paperId]
+        return metadata
+
+    def ensure_family(self, entry: Entry) -> tuple[Optional[dict], Optional[dict]]:
+        """Fetch entry data if it's not loaded
+
+        Args:
+            entry: The entry
+
+
+        """
+        metadata = self._ensure_paper_metadata(entry)
+        if metadata:
+            # if "data" in metadata["citations"]:
+            #     citations = metadata["citations"]["data"]
+            # else:
+            #     citations = metadata["citations"]
+            # if "data" in metadata["references"]:
+            #     references = metadata["references"]["data"]
+            # else:
+            #     references = metadata["references"]
+            if isinstance(metadata.citations, dict):
+                citations = metadata.citations["data"]
+            else:
+                citations = metadata.citations
+            if isinstance(metadata.references, dict):
+                references = metadata.references["data"]
+            else:
+                references = metadata.references
+            return citations, references
+        return None, None
+
+    def ensure_parents(self, entry):
+        """Make sure that the parents of the entry exist
+
+        Args:
+            entry: Entry
+
+
+        """
+        citations, references = self.ensure_family(entry)
+        if references:
+            if not entry.family["parents"]:
+                for ent_id in references[:5]:
+                    ent = self.s2.get_paper_data(ent_id)
+                    self.add_new_parent(entry, ent, direction="u")
+        else:
+            warnings.warn("No references for entry. Need to fetch")
+
+    def ensure_children(self, entry):
+        citations, references = self.ensure_family(entry)
+        if citations:
+            if not entry.family["children"]:
+                for ent_id in citations[:5]:
+                    ent = self.s2.get_paper_data(ent_id)
+                    self.add_new_child(entry, ent, direction="d")
+        else:
+            warnings.warn("No citations for entry. Need to fetch")
+
+    def expand_children(self):
+        """Expand children of an entry
+
+        """
+        selected = self.get_selected()
+        if not len(selected) == 1:
+            return
+
+        entry = selected[0]
+        self.ensure_children(entry)
+        if entry.family["children"]:
+            self.select_one(entry.family['children'])
+            self.toggle_nav_cycle(False)
+            self.toggle_nav_cycle(True, item_inds=entry.family['children'],
+                                  movement=self.inverse_orientmap["d"])
+        self.resize_and_update()
+
+    def expand_parents(self):
+        """Expand the parents of the entry.
+        """
+        selected = self.get_selected()
+        if not len(selected) == 1:
+            return
+
+        entry = selected[0]
+        self.ensure_parents(entry)
+        if entry.family["parents"]:
+            self.select_one(entry.family['parents'])
+            self.toggle_nav_cycle(False)
+            self.toggle_nav_cycle(True, item_inds=entry.family['parents'],
+                                  movement=self.inverse_orientmap["u"])
+        self.resize_and_update()
+
     def cycle_check(self, ind):
         if ind not in self.cycle_items:
             self.toggle_nav_cycle(False)
 
-    def toggle_nav_cycle(self, toggle, movement=None, item_inds=None, direction=None):
-        # items are always thoughts
+    def toggle_nav_cycle(self, toggle: bool,
+                         movement: str = Optional[None],
+                         item_inds: Optional[list[int]] = None,
+                         direction: Optional[str] = None):
+        """Toggle navigation cycle.
+
+        Items can be cycled in two directions: :code:`horizontal` and :code:`vertical`
+        Horizontal will cycle over siblings selecting each entry in turn
+
+        Args:
+            toggle: Toggle navigation cycle on or off
+            movement: The movement direction
+            item_inds: Item indices (??)
+            direction: Which direction to navigate
+
+
+        """
         if toggle and not self.cycle_items and item_inds:
             print(movement)
             current_item = self.selectedItems()[0]  # guaranteed to be one
@@ -165,67 +387,26 @@ class CiteMap(QGraphicsScene):
             self.cycle_index = 0
             self.cycle_items = []
 
-    def select_one(self, t_ind):
-        if isinstance(t_ind, set):
-            e = self.entries[list(t_ind)[0]]
+    def go_in_direction(self, direction):
+        if direction in {"l", "u", "d"}:
+            select_func = min
         else:
-            e = self.entries[t_ind]
-        if e.shape_item.isVisible():
-            self.unselect_all()
-            e.shape_item.setSelected(True)
-            gview = self.views()[0]
-            gview.ensureVisible(e.shape_item)
-
-    def fetch_paper_data(self, paper_id):
-        metadata = self._ss.get_metadata(paper_id)
-        self._paper_metadata_cache[paper_id] = metadata
-
-    def _ensure_paper_metadata(self, entry):
-        item = entry.text_item
-        if item._paper_data.paperId not in self._paper_metadata_cache:
-            self.fetch_paper_data(item._paper_data.paperId)
-        metadata = self._paper_metadata_cache[item._paper_data.paperId]
-        return metadata
-
-    def ensure_family(self, entry):
-        metadata = self._ensure_paper_metadata(entry)
-        if metadata:
-            if "data" in metadata["citations"]:
-                citations = metadata["citations"]["data"]
-            else:
-                citations = metadata["citations"]
-            if "data" in metadata["references"]:
-                references = metadata["references"]["data"]
-            else:
-                references = metadata["references"]
-            return citations, references
-        return None, None
-
-    def ensure_parents(self, entry):
-        citations, references = self.ensure_family(entry)
-        if references:
-            if not entry.family["parents"]:
-                for ent in references:
-                    self.add_new_parent(entry, ss.parse_data(ent), direction="u")
+            select_func = max
+        selected = self.get_selected()
+        if len(selected) == 1:
+            entry = self.get_entry(selected[0])
         else:
-            warnings.warn("No references for entry. Need to fetch")
-
-    def ensure_children(self, entry):
-        citations, references = self.ensure_family(entry)
-        if citations:
-            if not entry.family["children"]:
-                for ent in citations:
-                    self.add_new_child(entry, ss.parse_data(ent), direction="d")
-        else:
-            warnings.warn("No citations for entry. Need to fetch")
+            entry = self.get_entry(select_func(x.index for x in selected))
+        if entry.connections[direction]:
+            self.select_one(entry.connections[direction][0])
 
     def cycle_between(self, direction, movement=None, cycle=False):
-        print (self.movement, movement)
+        print(self.movement, movement)
         if not self.movement:
             self.movement = movement
             self.cycle_between(direction, movement, cycle=cycle)
         elif self.movement != movement:
-            print (self.entries[self.cycle_items[self.cycle_index]].family[direction])
+            print(self.entries[self.cycle_items[self.cycle_index]].family[direction])
             if 'parent' in self.entries[self.cycle_items[self.cycle_index]].family[direction] or \
                'children' in self.entries[self.cycle_items[self.cycle_index]].family[direction]:
                 self.movement = None
@@ -234,48 +415,19 @@ class CiteMap(QGraphicsScene):
                 return direction
             else:
                 return
-        # self.dir_map[
         else:
-            if direction == self.dir_map[self.movement][0]:
+            if direction == self.direction_map[self.movement][0]:
                 if not cycle:
                     self.cycle_index = max(0, self.cycle_index - 1)
                 else:
                     self.cycle_index = (self.cycle_index - 1) % len(self.cycle_items)
-            elif direction == self.dir_map[self.movement][1]:
+            elif direction == self.direction_map[self.movement][1]:
                 if not cycle:
                     self.cycle_index = min(len(self.cycle_items) - 1, self.cycle_index + 1)
                 else:
                     self.cycle_index = (self.cycle_index + 1) % len(self.cycle_items)
             self.select_one(self.cycle_items[self.cycle_index])
             return None
-
-    def expand_children(self):
-        selected = self.get_selected()
-        if not len(selected) == 1:
-            return
-
-        entry = selected[0]
-        self.ensure_children(entry)
-        if entry.family["children"]:
-            self.select_one(entry.family['children'])
-            self.toggle_nav_cycle(False)
-            self.toggle_nav_cycle(True, item_inds=entry.family['children'],
-                                  movement=self.inverse_orientmap["d"])
-        self.resize_and_update()
-
-    def expand_parents(self):
-        selected = self.get_selected()
-        if not len(selected) == 1:
-            return
-
-        entry = selected[0]
-        self.ensure_parents(entry)
-        if entry.family["parents"]:
-            self.select_one(entry.family['parents'])
-            self.toggle_nav_cycle(False)
-            self.toggle_nav_cycle(True, item_inds=entry.family['parents'],
-                                  movement=self.inverse_orientmap["u"])
-        self.resize_and_update()
 
     def partial_expand(self, direction):
         selected = self.get_selected()
@@ -285,7 +437,7 @@ class CiteMap(QGraphicsScene):
         for entry in selected:
             if isinstance(entry, Shape):
                 entry = entry.text_item
-            print("part_expand", entry.text, entry.part_expand)
+            print("part_expand", entry.state.text, entry.part_expand)
             if 'siblings' in entry.family[direction]:  # or 'siblings' in entry.family[self.inverse_map[direction]]:
                 if entry.part_expand[direction] == 'e':
                     if 'children' in entry.family[direction]:  # and entry.family[direction]['children']:
@@ -319,20 +471,7 @@ class CiteMap(QGraphicsScene):
                         entry.part_expand[self.inverse_map[direction]] = 'd'
                         self.collapse_indir(entry, self.inverse_map[direction])
 
-    def dist(self, a, b):
-        """Return squared Euclidean distance between two data types
-        Overloaded a, b are supported from which x, y coordinates
-        can be extracted.
-
-        Args:
-            a: Data type a
-            b: Data type b
-
-
-        """
-        coord_a, coord_b = self.coord(a), self.coord(b)
-        return (coord_a.x - coord_b.x) ** 2 + (coord_a.y - coord_b.y) ** 2
-
+    # START: status_bar
     def reposition_status_bar(self, geom):
         """Reposition status bar on gometry change
 
@@ -374,6 +513,7 @@ class CiteMap(QGraphicsScene):
             for lk in self.links.keys():
                 if t in lk and self.entries[t].hidden:
                     self.links[lk].setVisible(False)
+    # END: status_bar
 
     def update_pos(self):
         """This method is called via :class:`Shape` if the :class:`Shape` position changes
@@ -383,7 +523,9 @@ class CiteMap(QGraphicsScene):
             thought.coords = thought.mapToScene(thought.pos())
             thought.shape_coords = (thought.shape_item.pos().x(), thought.shape_item.pos().y())
 
-    def add_entry(self, paper_data: ss.Paper, pos: Coord, data=None, shape=None):
+    def add_entry(self, paper_data: ss.CachePaperData, pos: Coord,
+                  data: Optional[dict] = None,
+                  shape: Optional[Shapes] = None) -> Entry:
         """Add the given :class:`ss.Paper` entry data at pos
 
         Args:
@@ -396,11 +538,12 @@ class CiteMap(QGraphicsScene):
             shape = Shapes.rounded_rectangle
         self.cur_index += 1
         self.entries[self.cur_index] = Entry(self, self.cur_index,
-                                             text=ss.format_entry(paper_data),
+                                             text=self.s2.format_entry(paper_data),
                                              coords=pos, shape=shape,
                                              data=data or {},
                                              paper_data=paper_data)
         self.resize_and_update()
+        return self.entries[self.cur_index]
 
     def update_parent(self, children, target):
         # if there are multiple famillies, find the highest member in each
@@ -482,20 +625,68 @@ class CiteMap(QGraphicsScene):
             self.add_link(target.index, t.index, direction)
             self.update_siblings(target, t, direction)
 
-    def update_siblings(self, par, child, direction):
-        pass
+    def update_siblings(self, parent, child, direction):
         iorient = self.inverse_map[self.orient_map[direction]]
         # avoid adding self to siblings, although in most other cases self is sibling
-        if "children" in par.family[direction] and len(par.family[direction]["children"]) > 1:
+        if "children" in parent.family[direction] and len(parent.family[direction]["children"]) > 1:
             if "children" not in child.family[iorient[0]]:
                 child.family[iorient[0]].update({"siblings": None})
             if "children" not in child.family[iorient[1]]:
                 child.family[iorient[1]].update({"siblings": None})
-            for i in par.family[direction]["children"]:
+            for i in parent.family[direction]["children"]:
                 self.entries[i].family[iorient[0]]["siblings"] =\
-                    par.family[direction]["children"].copy()
+                    parent.family[direction]["children"].copy()
                 self.entries[i].family[iorient[1]]["siblings"] =\
-                    par.family[direction]["children"].copy()
+                    parent.family[direction]["children"].copy()
+
+    def traverse_to_end(self, entries, direction):
+        entry = first_by(entries, lambda x: self.entries[x].connections[direction])
+        flag = True
+        if entry:
+            entry = self.get_entry(entry)
+        while flag:
+            if not entry.connections[direction]:
+                break
+            entry = self.get_entry(entry.connections[direction][0])
+        return entry
+
+    def add_connections(self, entry_a, entry_b, directions, pos_neg):
+        if pos_neg == "pos":
+            entry_a.add_connection_at_end_in_direction(entry_b.index, directions[1])
+            entry_b.add_connection_at_end_in_direction(entry_a.index, directions[0])
+        else:
+            entry_a.add_connection_at_beginning_in_direction(entry_b.index, directions[1])
+            entry_b.add_connection_at_beginning_in_direction(entry_a.index, directions[0])
+
+    def update_parent_siblings(self, child, directions, pos_neg):
+        parents = child.family["parents"]
+        if pos_neg == "neg":
+            directions = directions[::-1]
+        if len(parents) > 1:    # must have siblings
+            if len(parents) > 2:
+                a = self.traverse_to_end(parents, directions[1])
+                b = parents[-1]
+            else:
+                a, b = parents
+            a, b = self.get_entry(a), self.get_entry(b)
+            self.add_connections(a, b, directions, pos_neg)
+            # a.add_connection_at_end_in_direction(b.index, directions[1])
+            # b.add_connection_at_end_in_direction(a.index, directions[0])
+
+    def update_children_siblings(self, parent, directions, pos_neg):
+        children = parent.family["children"]
+        if pos_neg == "neg":
+            directions = directions[::-1]
+        if len(children) > 1:    # must have siblings
+            if len(children) > 2:
+                a = self.traverse_to_end(children, directions[1])
+                b = children[-1]
+            else:
+                a, b = children
+            a, b = self.get_entry(a), self.get_entry(b)
+            self.add_connections(a, b, directions, pos_neg)
+            # a.add_connection_at_end_in_direction(b.index, directions[1])
+            # b.add_connection_at_end_in_direction(a.index, directions[0])
 
     def fix_place_children(self, parent):
         for c in ["u", "d", "l", "r"]:
@@ -510,7 +701,7 @@ class CiteMap(QGraphicsScene):
         if f_dir == to_dir:
             children = par.family[f_dir].pop("children")
             for c_ind in children:
-                pos = self.place_relative(par, f_dir)
+                pos = self.try_place_entry_relative_to(par, f_dir)
                 self.entries[c_ind].shape_item.setPos(pos)
                 if "children" in par.family[f_dir]:
                     par.family[f_dir]["children"].add(c_ind)
@@ -529,7 +720,7 @@ class CiteMap(QGraphicsScene):
                     par.family[direction]["children"].add(c_ind)
                 else:
                     par.family[direction] = {"children": {c_ind}}
-                pos = self.place_relative(par, direction)
+                pos = self.try_place_entry_relative_to(par, direction)
                 self.entries[c_ind].shape_item.setPos(pos)
                 self.entries[c_ind].side = direction
                 self.removeItem(self.links[(par.index, c_ind)])
@@ -546,7 +737,7 @@ class CiteMap(QGraphicsScene):
             par.family[idir].pop("children")
             self.fix_family(par)
 
-    def last_child_ordinate(self, t_inds, orientation, axis):
+    def last_child_and_ordinate(self, inds, orientation, axis):
         if orientation == "horizontal":
             coo = lambda item: self.coord(item).x
         else:
@@ -558,11 +749,11 @@ class CiteMap(QGraphicsScene):
             func = min
             op = operator.sub
 
-        axes = [(t_ind, coo(t_ind)) for t_ind in t_inds]
-        retval = func(axes, key=lambda x: x[1])
-        return op(retval[1], self.entries[retval[0]].
-                  shape_item.boundingRect().
-                  getRect()[2 if orientation == "horizontal" else 3])
+        ind_ordinate = [(ind, coo(ind)) for ind in inds]
+        retval = func(ind_ordinate, key=lambda x: x[1])
+        return retval[0], op(retval[1],
+                             self.entries[retval[0]].shape_item.boundingRect().getRect()[
+                                 2 if orientation == "horizontal" else 3])
 
     def drag_and_drop(self, event, pos=None, data=None):
         if not data:
@@ -590,37 +781,36 @@ class CiteMap(QGraphicsScene):
         else:
             self.add_entry(data, pos)
 
-    def place_relative(self, parent, direction):
-        shape_item = parent.shape_item  # shape item for that thought
+    def try_place_entry_relative_to(self, entry, direction):
+        shape_item = entry.shape_item  # shape item for that thought
 
-        def relatives(parent, c_inds):
-            return map(lambda x: self.entries[x], parent.family[direction]["children"])
+        def relatives(entry):
+            return map(lambda x: self.entries[x], entry.connections[direction])
 
         pos = None
         axis, orientation = self.direction_map[direction]
         displacement = 200
         buffer = 20
-        if "parent" in parent.family[direction]:  # [0] == "parent":  # or parent.family[direction][0] == "siblings":
-            return
         coords = self.coord(shape_item)
         x, y = coords.x, coords.y
-        if "children" in parent.family[direction]:
-            children = parent.family[direction]["children"]
+        child_axis = None
+        if entry.connections[direction]:
+            entries_in_direction = entry.connections[direction]
             on_side = None
             child_axis = None
             if direction in {"l", "r"}:
-                on_side = [1 if self.coord(c).y < y else 0 for c in relatives(parent, children)]
+                on_side = [1 if self.coord(c).y < y else 0 for c in relatives(entry)]
             elif direction in {"u", "d"}:
-                on_side = [1 if self.coord(c).x < x else 0 for c in relatives(parent, children)]
+                on_side = [1 if self.coord(c).x < x else 0 for c in relatives(entry)]
             if sum(on_side) < len(on_side)/2:
                 child_axis = "neg"
             else:
                 child_axis = "pos"
 
-            lco = self.last_child_ordinate(children, "horizontal"
-                                           if orientation == "vertical"
-                                           else "vertical", child_axis)
-
+            _orientation = "horizontal" if orientation == "vertical" else "vertical"
+            last_child, lco = self.last_child_and_ordinate(entries_in_direction,
+                                                           _orientation,
+                                                           child_axis)
             if direction == "l":
                 if child_axis == "neg":
                     pos = QPointF(x - displacement, lco - buffer)
@@ -655,7 +845,7 @@ class CiteMap(QGraphicsScene):
                     pos = QPointF(x, y - displacement)
                 else:  # d
                     pos = QPointF(x, y + displacement + shape_item.boundingRect().getRect()[3])
-        return pos
+        return pos, child_axis or axis
 
     def add_new_parent(self, child, paper_data,
                        data={}, shape=Shapes.rectangle, direction=None):
@@ -670,47 +860,84 @@ class CiteMap(QGraphicsScene):
 
 
         """
+        # import ipdb; ipdb.set_trace()
         if isinstance(child, Shape):
             child = child.text_item
 
         if not direction:
             direction = child.insert_dir
-        axis, orientation = self.direction_map[direction]
-        pos = self.place_relative(child, direction)
+        # axis, orientation = self.direction_map[direction]
+        pos, relative_direction = self.try_place_entry_relative_to(child, direction)
+        _orientation = self.orient_map[direction]
+        print(f"Adding parent at {pos}, {relative_direction} and"
+              f" {self.direction_map[relative_direction][_orientation]}")
         data.update({'side': direction})
-        self.add_entry(paper_data, pos, {"family": {"children": child.index}})
+        parent = self.add_entry(paper_data, pos, {"family": {"children": [child.index]}})
 
-        child.add_relative_in_direction(self.cur_index, direction)
-        child.add_parents(self.cur_index)
+        child.add_parent(parent.index)
+        # TODO: This adds a visible entry
+        #       This is where filter can be added
+        if relative_direction == "pos":
+            child.add_connection_at_end_in_direction(parent.index, direction)
+        else:
+            child.add_connection_at_beginning_in_direction(parent.index, direction)
 
-        c_t = self.entries[self.cur_index]
-        idir = self.inverse_map[direction]
-        c_t.add_children(child.index)
-        c_t.add_relative_in_direction(child.index, idir)
-        self.update_siblings(child, c_t, direction)
-        self.add_link(child.index, self.cur_index, direction=direction)
+        parent.add_child(child.index)
+        parent.add_connection_at_end_in_direction(child.index, self.inverse_map[direction])
+        self.update_parent_siblings(child, self.sibling_add_directions(direction),
+                                    relative_direction)
+        self.add_link(child.index, parent.index, direction=direction)
 
-    def add_new_child(self, parent, paper_data,
+    def add_new_child(self, parent: Entry, paper_data: ss.CachePaperData,
                       data={}, shape=Shapes.rectangle, direction=None):
         if isinstance(parent, Shape):
             parent = parent.text_item
 
         if not direction:
             direction = parent.insert_dir
-        axis, orientation = self.direction_map[direction]
-        pos = self.place_relative(parent, direction)
+        # axis, orientation = self.direction_map[direction]
+        pos, relative_direction = self.try_place_entry_relative_to(parent, direction)
+        _orientation = self.orient_map[direction]
+        print(f"Adding parent at {pos}, {relative_direction} and {self.direction_map[relative_direction][_orientation]}")
         data.update({'side': direction})
-        self.add_entry(paper_data, pos, data={"family": {"parents": parent.index}})
+        child = self.add_entry(paper_data, pos, data={"family": {"parents": [parent.index]}})
 
-        parent.add_relative_in_direction(self.cur_index, direction)
-        parent.add_children(self.cur_index)
+        parent.add_child(child.index)
+        parent.add_connection_at_end_in_direction(child.index, direction)
 
-        c_t = self.entries[self.cur_index]
-        idir = self.inverse_map[direction]
-        c_t.add_parents(parent.index)
-        c_t.add_relative_in_direction(parent.index, idir)
-        self.update_siblings(parent, c_t, direction)
-        self.add_link(parent.index, self.cur_index, direction=direction)
+        child.add_parent(parent.index)
+        child.add_connection_at_end_in_direction(parent.index, self.inverse_map[direction])
+        self.update_children_siblings(parent, self.sibling_add_directions(direction),
+                                      relative_direction)
+        self.add_link(parent.index, child.index, direction=direction)
+
+    def expand_entries_text(self, entries: list[Entry | int]):
+        for entry in entries:
+            entry = self.get_entry(entry)
+            paper_data = entry.paper_data
+            text = self.s2.format_entry(paper_data, self._expanded_entry_fields)
+            entry.set_state_property("text", text)
+            entry.set_state_property("collapsed", False)
+
+    def collapse_entries_text(self, entries: list[Entry | int]):
+        for entry in entries:
+            entry = self.get_entry(entry)
+            paper_data = entry.paper_data
+            text = self.s2.format_entry(paper_data, self._collapsed_entry_fields)
+            entry.set_state_property("text", text)
+            entry.set_state_property("collapsed", True)
+
+    def toggle_expand_entries_text(self, entries: list[Entry | int]):
+        for entry in entries:
+            entry = self.get_entry(entry)
+            collapsed = not entry.state.collapsed
+            paper_data = entry.paper_data
+            if collapsed:
+                text = self.s2.format_entry(paper_data, self._collapsed_entry_fields)
+            else:
+                text = self.s2.format_entry(paper_data, self._expanded_entry_fields)
+            entry.set_state_property("text", text)
+            entry.set_state_property("collapsed", collapsed)
 
     def add_link(self, t1_ind, t2_ind, direction=None):
         if not direction:
@@ -801,6 +1028,45 @@ class CiteMap(QGraphicsScene):
                 self.target_item = None
                 self.update()
 
+    def hide_entries_in_direction(self, entry, expansion, direction):
+        if entry.family[direction]:
+            entries = [self.entries[x] for x in entry.family[direction]]
+            for other in entries:
+                other.check_hide(False if expansion == 'e' else True)
+                self.links[entry.index, other.index].setVisible(True if expansion == 'e' else False)
+            # self.fix_expansion(children, 'part')
+            self.hide_entries(entries, expansion, True, False)
+
+    def hide_entries(self, entries, expansion=None, recurse=False, expand_leaves=True):
+        entries = [t if isinstance(t, Entry) else t.text_item for t in entries]
+        # 'e' is expand, 'd' is hide
+        for entry in entries:
+            if not expansion:
+                expansion = entry.toggle_expand('t')
+            elif recurse:
+                entry.toggle_expand(expansion)
+            children = [self.entries[i] for i in entry.family['children']]
+            if expansion == 'e':
+                for child in children:
+                    if not expand_leaves:
+                        entry.toggle_expand('d')
+                        if child.family['children']:
+                            child.check_hide(False)
+                            self.links[entry.index, child.index].setVisible(True)
+                            entry.toggle_expand('e')
+                    else:
+                        child.check_hide(False)
+                        self.links[entry.index, child.index].setVisible(True)
+                if recurse:
+                    self.hide_entries(children, 'e', recurse=True, expand_leaves=expand_leaves)
+                # self.adjust_thoughts()
+            elif expansion == 'd':
+                for child in children:
+                    child.check_hide(True)
+                    child.toggle_expand('d')
+                    self.links[(entry.index, child.index)].setVisible(False)
+                self.hide_thoughts(children, 'd')
+
     def remove_arrows(self):
         if self.arrows:
             direction = self.arrows[0].direction
@@ -812,15 +1078,15 @@ class CiteMap(QGraphicsScene):
                     item = item.text_item
                 item.insert_dir = direction
 
-    def highlight(self, t_inds):
-        op_inds = t_inds
+    def highlight(self, inds):
+        op_inds = inds
         all_inds = set(self.entries.keys())
-        tl_inds = all_inds.difference(set(t_inds))
+        tl_inds = all_inds.difference(set(inds))
         for t in tl_inds:
             self.entries[t].set_transluscent()
         for t in op_inds:
             self.entries[t].set_opaque()
-        if t_inds:
+        if inds:
             self.select_one(set(op_inds))
 
     def un_highlight(self):
@@ -868,11 +1134,15 @@ class CiteMap(QGraphicsScene):
                 ts.shape_item.setSelected(True)
         else:
             if len(selected) == 1:
-                thought = selected[0].text_item
+                entry = selected[0].text_item
                 for c in ['u', 'd', 'l', 'r']:
-                    if 'siblings' in thought.family[c]:
-                        for s in thought.family[c]['siblings']:
+                    if 'siblings' in entry.family[c]:
+                        for s in entry.family[c]['siblings']:
                             self.select(s)
+
+    def abort(self):
+        self.unselect_all()
+        self.toggle_nav_cycle(False)
 
     # links also?
     def unselect_all(self):

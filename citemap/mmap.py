@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QGraphicsItem
 from .thought import Thought
 from .link import Arrow, Link
 from .shape import Shape, Shapes
-from .io import load_file, save_file
+from .util import load_file, save_file
 
 
 class MMap:

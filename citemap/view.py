@@ -7,7 +7,7 @@ from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsPixmapItem
 
 from . import ss
-from .paper import Entry
+from .entry import Entry
 from .shape import Shape
 
 
@@ -129,80 +129,86 @@ class View(QGraphicsView):
         self._scene.resize_and_update()
 
     def mouseDoubleClickEvent(self, event):
+        """Handle Mouse Double Click
+
+        We simply send the event to Item if it's present. Does nothing otherwise
+
+        Args:
+            event: QEvent
+
+        """
         if event.button() == Qt.LeftButton:
-            # send event to item
             item = self.itemAt(event.pos())
             if isinstance(item, Shape) or isinstance(item, Entry):
                 item.mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event):
+        """Override Key release event
+
+        Only panning and movement is handled with Shift+Click.
+        Rest are handled via actions
+
+        Args:
+            event: QEvent
+
+        """
         if event.key() == Qt.Key_Shift and not self._mousePressed:
             self._isPanning = True
             self.setCursor(Qt.OpenHandCursor)
 
-        if not self._scene.typing:  # All the key events handled by the scene go here
-            if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
-                self._scene.select_all()
-            if event.key() == Qt.Key_N and event.modifiers() & Qt.ShiftModifier:  # maybe change this later
-                selected = self.scene().selectedItems()
-                self._scene.select_descendants(selected)
-            # if event.key() == Qt.Key_S:
-            #     if event.modifiers() & Qt.ControlModifier:
-            #         self._scene.search_toggle()
-            #     else:
-            #         self._scene.save_data()
-            #     event.accept()
-            if event.key() == Qt.Key_P or event.key() == Qt.Key_Return:  # open_pdf
-                items = self.scene().selectedItems()
-                if len(items) == 1 and (
-                        isinstance(items[0], Entry) or isinstance(items[0], Shape)):
-                    items[0].open_pdf()
-                    event.accept()
-                else:
-                    super().keyPressEvent(event)
-            elif event.key() == Qt.Key_Space and event.modifiers() & Qt.ShiftModifier:  # recursive expansion
-                self._scene.hide_thoughts(self._scene.get_selected(), 'e', recurse=True)
-                event.accept()
-            elif event.key() == Qt.Key_Space:  # expansion
-                self._scene.hide_thoughts(self._scene.get_selected())
-                event.accept()
-            elif event.key() == Qt.Key_I:  # insertion
-                thoughts = self._scene.get_selected()
-                if len(thoughts) == 1:
-                    self._scene.add_new_child(thoughts[0])
-                elif not thoughts:
-                    self._scene.add_thought(QPointF(1.0, 1.0))
-                event.accept()
-            elif event.key() == Qt.Key_E:  # set editable
-                items = self.scene().selectedItems()
-                if len(items) == 1 and (
-                        isinstance(items[0], Entry) or isinstance(items[0], Shape)):
-                    items[0].set_editable(True)
-                    event.accept()
-                else:
-                    super().keyPressEvent(event)
-            elif event.key() == Qt.Key_D:
-                thoughts = self._scene.get_selected()
-                if thoughts:
-                    for t in thoughts:
-                        if isinstance(t, Entry):
-                            self._scene.delete_thought(t)
-                        elif isinstance(t, Shape):
-                            self._scene.delete_thought(t.text_item)
-            elif event.key() in {Qt.Key_H, Qt.Key_L, Qt.Key_K, Qt.Key_J, Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down}:
-                if event.modifiers() & Qt.ControlModifier:
-                    self._scene.partial_expand(event)  # or select children in that direction
-                elif event.modifiers() & Qt.ShiftModifier:
-                    self._scene.set_insert_direction(event)
-                else:
-                    self._scene.key_navigate(event)
-                event.accept()
-            elif event.key() == Qt.Key_Escape or ((event.key() == Qt.Key_G) and event.modifiers() & Qt.ControlModifier):
-                self._scene.unselect_all()
-                event.accept()
-        # This is when either the QGraphicsTextItem or the QLineEdit have focus
-        else:
-            super().keyPressEvent(event)
+        super().keyPressEvent(event)
+        # if not self._scene.typing:  # All the key events handled by the scene go here
+        #     if event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
+        #         self._scene.select_all()
+        #     if event.key() == Qt.Key_N and event.modifiers() & Qt.ShiftModifier:  # maybe change this later
+        #         selected = self.scene().selectedItems()
+        #         self._scene.select_descendants(selected)
+        #     # if event.key() == Qt.Key_S:
+        #     #     if event.modifiers() & Qt.ControlModifier:
+        #     #         self._scene.search_toggle()
+        #     #     else:
+        #     #         self._scene.save_data()
+        #     #     event.accept()
+        #     if event.key() == Qt.Key_P or event.key() == Qt.Key_Return:  # open_pdf
+        #         items = self.scene().selectedItems()
+        #         if len(items) == 1 and (
+        #                 isinstance(items[0], Entry) or isinstance(items[0], Shape)):
+        #             items[0].open_pdf()
+        #             event.accept()
+        #         else:
+        #             super().keyPressEvent(event)
+        #     elif event.key() == Qt.Key_Space and event.modifiers() & Qt.ShiftModifier:  # recursive expansion
+        #         self._scene.hide_thoughts(self._scene.get_selected(), 'e', recurse=True)
+        #         event.accept()
+        #     elif event.key() == Qt.Key_Space:  # expansion
+        #         self._scene.hide_thoughts(self._scene.get_selected())
+        #         event.accept()
+        #     elif event.key() == Qt.Key_I:  # insertion
+        #         thoughts = self._scene.get_selected()
+        #         if len(thoughts) == 1:
+        #             self._scene.add_new_child(thoughts[0])
+        #         elif not thoughts:
+        #             self._scene.add_thought(QPointF(1.0, 1.0))
+        #         event.accept()
+        #     elif event.key() == Qt.Key_E:  # set editable
+        #         items = self.scene().selectedItems()
+        #         if len(items) == 1 and (
+        #                 isinstance(items[0], Entry) or isinstance(items[0], Shape)):
+        #             items[0].set_editable(True)
+        #             event.accept()
+        #         else:
+        #             super().keyPressEvent(event)
+        #     elif event.key() == Qt.Key_D:
+        #         thoughts = self._scene.get_selected()
+        #         if thoughts:
+        #             for t in thoughts:
+        #                 if isinstance(t, Entry):
+        #                     self._scene.delete_thought(t)
+        #                 elif isinstance(t, Shape):
+        #                     self._scene.delete_thought(t.text_item)
+        # # This is when either the QGraphicsTextItem or the QLineEdit have focus
+        # else:
+        #     super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
         # if any keyrelease happens, remove all arrows
@@ -251,22 +257,3 @@ class View(QGraphicsView):
                 self.zoom_in(event.pos(), old_pos)
             else:
                 self.zoom_out(event.pos(), old_pos)
-
-
-if __name__ == '__main__':
-    from PyQt5.QtOpenGL import QGL
-    from PyQt5.QtOpenGL import QGLWidget
-    from PyQt5.QtOpenGL import QGLFormat
-    from PyQt5.QtWidgets import QApplication, QGraphicsScene
-    app = QApplication(sys.argv)
-    scene = QGraphicsScene()
-    grview = View(scene)
-    grview.setCacheMode(grview.CacheBackground)
-    grview.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-    grview.setViewport(QGLWidget(QGLFormat(QGL.SampleBuffers)))
-    grview.resize(800, 600)
-    scene.setSceneRect(0, 0, 800, 600)
-    scene.stickyFocus = True
-    grview.fitInView(scene.sceneRect(), Qt.KeepAspectRatio)
-    grview.show()
-    sys.exit(app.exec_())

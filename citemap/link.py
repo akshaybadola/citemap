@@ -3,7 +3,7 @@ import math
 from PyQt5.QtCore import Qt, QRectF, QSizeF, QPointF, QLineF
 from PyQt5.QtGui import QPainter, QColor, QPen, QPolygonF
 from PyQt5.QtWidgets import QGraphicsLineItem
-from .paper import Entry
+from .entry import Entry
 
 
 # Give all links in a family the same color and different
@@ -64,10 +64,12 @@ class Arrow(QGraphicsLineItem):
             en = self.mapFromItem(self.item, link_coords[2][0] + 100, link_coords[2][1])
         elif self.direction == 'u':
             st = self.mapFromItem(self.item, link_coords[1][0], link_coords[1][1])
-            en = self.mapFromItem(self.item, link_coords[2][0] - item_rect[2]/2, link_coords[2][1] - 100 - item_rect[3]/2)
+            en = self.mapFromItem(self.item, link_coords[2][0] - item_rect[2]/2,
+                                  link_coords[2][1] - 100 - item_rect[3]/2)
         elif self.direction == 'd':
             st = self.mapFromItem(self.item, link_coords[3][0], link_coords[3][1])
-            en = self.mapFromItem(self.item, link_coords[2][0] - item_rect[2]/2, link_coords[2][1] + 100 + item_rect[3]/2)
+            en = self.mapFromItem(self.item, link_coords[2][0] - item_rect[2]/2,
+                                  link_coords[2][1] + 100 + item_rect[3]/2)
 
         line = self.setLine(QLineF(en, st))
         line = self.line()
@@ -98,7 +100,8 @@ class Arrow(QGraphicsLineItem):
 
 
 class Link(QGraphicsLineItem):
-    def __init__(self, start_item, end_item, color, parent=None, scene=None, direction=None, collide=False):
+    def __init__(self, start_item, end_item, color, parent=None,
+                 scene=None, direction=None, collide=False):
         super(Link, self).__init__(parent)
         self.arrowHead = QPolygonF()
         self.collide = collide
@@ -140,7 +143,8 @@ class Link(QGraphicsLineItem):
         extra = (self.pen().width() + 20) / 2.0
         p1 = self.line().p1()
         p2 = self.line().p2()
-        return QRectF(p1, QSizeF(p2.x() - p1.x(), p2.y() - p1.y())).normalized().adjusted(-extra, -extra, extra, extra)
+        return QRectF(p1, QSizeF(p2.x() - p1.x(), p2.y() - p1.y()))\
+            .normalized().adjusted(-extra, -extra, extra, extra)
 
     def shape(self):
         path = super(Link, self).shape()

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from .util import PathLike
+from .util import Pathlike
 
 from . import actions
 
@@ -14,11 +14,11 @@ class Binding:
 
 @dataclass
 class Config:
-    data_dir: PathLike
+    data_dir: Pathlike
     keybindings: list[Binding]
 
 
-def load_config(config_file: PathLike):
+def load_config(config_file: Pathlike):
     with open(config_file) as f:
         config = yaml.load(f, Loader=yaml.SafeLoader)
     keybindings = [Binding(**b) for b in config["keybindings"]]

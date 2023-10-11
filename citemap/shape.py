@@ -7,13 +7,6 @@ from PyQt5.QtWidgets import (QGraphicsEllipseItem, QGraphicsItem)
 
 from .util import linspace
 
-# so now most of the basic drawing is working. I don't need
-# any animation for now and I've added the icon
-# Need to add changed cursors for movement of the items
-
-# text_rect = self.text_item.boundingRect().getRect()
-# self.rect_ = QRectF(text_rect[0] - 10, text_rect[1] - 10, text_rect[2] + 20, text_rect[3] + 20)
-
 
 @unique
 class Shapes(IntEnum):
@@ -30,8 +23,6 @@ class Shapes(IntEnum):
 class Shape(QGraphicsEllipseItem):
     def __init__(self, text_item, color, *args):
         self.text_item = text_item
-        self.family = self.text_item.family
-        self.index = self.text_item.index
         self.color = color
         super(Shape, self).__init__(self.boundingRect())
         self.setFlags(
@@ -46,7 +37,19 @@ class Shape(QGraphicsEllipseItem):
         self.set_editable = self.text_item.set_editable
         self.open_pdf = self.text_item.open_pdf
         self.setZValue(-1)
-        self.text_item.mmap.links_zvalue(self.text_item, -2)
+        self.text_item._scene.links_zvalue(self.text_item, -2)
+
+    @property
+    def family(self):
+        return self.text_item.family
+
+    @property
+    def index(self):
+        return self.text_item.index
+
+    @property
+    def paper_data(self):
+        return self.text_item.state.paper_data
 
     # ['l', 'u', 'r', 'd']
     def get_link_coords(self):
@@ -90,24 +93,26 @@ class Shape(QGraphicsEllipseItem):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.set_editable(True)
-            event.accept()
+            pass                # ignore for now
+            # self.set_editable(True)
+            # event.accept()
+            # NOTE: the following was already commented
             # self.text_item.setTextInteractionFlags(Qt.TextEditorInteraction)
             # self.text_item.setFocus()
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange:
-            self.text_item.mmap.update_pos()
+            self.text_item._scene.update_pos()
         if change == QGraphicsItem.ItemSelectedChange:
             if value:
                 self.setZValue(2)
                 self.make_brush('dark')
-                self.text_item.mmap.links_zvalue(self.text_item, 1)
-                self.text_item.mmap.cycle_check(self.text_item.index)
+                self.text_item._scene.links_zvalue(self.text_item, 1)
+                self.text_item._scene.cycle_check(self.text_item.index)
             else:
                 self.setZValue(-1)
                 self.make_brush('regular')
-                self.text_item.mmap.links_zvalue(self.text_item, -2)
+                self.text_item._scene.links_zvalue(self.text_item, -2)
         self.update()
         return super().itemChange(change, value)
 
@@ -128,7 +133,7 @@ class Shape(QGraphicsEllipseItem):
         return pixmap
 
 
-# Must create similar classes like these
+# CHECK: Why are `super()` calls commented?
 class Ellipse(Shape):
     def __init__(self, text_item, color, *args):
         # super().__init__(text_item, color, *args)
@@ -227,18 +232,6 @@ class RoundedRectangle(Shape):
     def boundingRect(self):
         text_rect = self.text_item.boundingRect().getRect()
         return QRectF(text_rect[0] - 10, text_rect[1] - 10, text_rect[2] + 20, text_rect[3] + 20)
-        # side = self.text_item.side
-        # wid = text_rect[2]
-        # ht = text_rect[3]
-        # if side == 'left':
-        #     return QRectF(text_rect[0] - wid/6, text_rect[1] - ht/4, text_rect[2] + wid/3, text_rect[3] + ht/2)
-        # elif side == 'right':
-        #     return QRectF(text_rect[0] - wid/6, text_rect[1] - ht/4, text_rect[2] + wid/3, text_rect[3] + ht/2)
-        # elif side == 'up':
-        #     return QRectF(text_rect[0] - wid/6, text_rect[1] - ht/4, text_rect[2] + wid/3, text_rect[3] + ht/2)
-        # elif side == 'down':
-        #     return QRectF(text_rect[0] - wid/6, text_rect[1] - ht/4, text_rect[2] + wid/3, text_rect[3] + ht/2)
-        # return QRectF(text_rect[0] - wid/6, text_rect[1] - ht/4, text_rect[2] + wid/3, text_rect[3] + ht/2)
 
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.Antialiasing)
@@ -246,38 +239,3 @@ class RoundedRectangle(Shape):
         painter.setPen(QPen(Qt.NoPen))
         # painter.setPen(QPen(QColor(0, 0, 0, 255), 0.0, Qt.SolidLine))
         painter.drawRoundedRect(self.boundingRect(), 5.0, 5.0)
-
-
-# from PyQt5.QtWidgets import QGraphicsPixmapItem, QGraphicsTextItem, QGraphicsRectItem
-# class Icon(QGraphicsPixmapItem):
-#     def __init__(self, pixmap, parent):
-#         super(Icon, self).__init(pixmap, parent)
-
-
-# from PyQt5.QtWidgets import QGraphicsScene, QApplication, QGraphicsView
-# from .view import View
-# def main():
-#     app = QApplication(sys.argv)
-
-#     view = View()
-#     scene = QGraphicsScene()
-#     scene.setSceneRect(0, 0, 680, 459)
-#     scene.stickyFocus = True
-
-#     scene.addPixmap(QPixmap('01.png'))
-#     view.setScene(scene)
-
-#     st = ShapeType
-#     # Shape = None
-#     # item = Shape(None, 0, 0, 300, 150)
-#     e_item = CustomTextItem("this is a text", st.oval)
-#     e_item.add_item(scene, (10.0, 10.0))
-#     r_item = CustomTextItem("this is a text", st.rectangle)
-#     r_item.add_item(scene, (100.0, 100.0))
-#     rr_item = CustomTextItem("this is a text", st.rounded_rectangle)
-#     rr_item.add_item(scene, (200.0, 200.0))
-#     c_item = CustomTextItem("this is a text", st.circle)
-#     c_item.add_item(scene, (300.0, 300.0))
-#     view.fitInView(scene.sceneRect(), Qt.KeepAspectRatio)
-#     view.show()
-#     sys.exit(app.exec_())
